@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IERN - Almoço Conectado</title>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    
+    <style>
+        :root {
+            --primary: #1a5e5e; --secondary: #edf2f7; --accent: #2c7a7b;
+            --text: #2d3748; --warning-bg: #fffaf0; --date-bg: #ebf8ff; --danger: #e53e3e;
+        }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #e2e8f0; margin: 0; padding: 10px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 600px; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: var(--primary); margin: 0 0 10px 0; }
+        .data-alvo { text-align: center; background: var(--date-bg); color: #2b6cb0; padding: 12px; border-radius: 12px; font-weight: bold; margin-bottom: 15px; border: 1px solid #bee3f8; }
+        .regras { background-color: var(--warning-bg); color: #744210; padding: 10px; border-radius: 10px; font-size: 0.8rem; margin-bottom: 15px; border-left: 5px solid #f6ad55; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 6px; font-weight: bold; }
+        select { width: 100%; padding: 14px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 16px; }
+        button { width: 100%; padding: 16px; background-color: var(--primary); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        button:disabled { background-color: #cbd5e0; }
+        .status-msg { font-weight: bold; text-align: center; margin-bottom: 15px; padding: 10px; border-radius: 8px; }
+        .error { background: #fff5f5; color: #c53030; }
+        .success { background: #f0fff4; color: #2f855a; }
+        .columns { display: flex; gap: 15px; margin-top: 25px; }
+        .column { flex: 1; background: #f7fafc; padding: 15px; border-radius: 12px; min-height: 150px; }
+        .column h3 { font-size: 1rem; text-align: center; color: var(--primary); border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+        ul { list-style: none; padding: 0; }
+        li { background: white; padding: 10px; margin-bottom: 6px; border-radius: 8px; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--primary); }
+        .btn-del { background: var(--danger); color: white; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.7rem; display: none; }
+        .adm-section { margin-top: 30px; text-align: center; border-top: 1px dashed #cbd5e0; padding-top: 15px; }
+        .btn-adm { background: #718096; width: auto; padding: 8px 20px; font-size: 0.8rem; }
+        @media (max-width: 480px) { .columns { flex-direction: column; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>IERN - Lista de Almoço</h2>
+    <div id="dataExibicao" class="data-alvo"></div>
+    <div class="regras"><strong>Inscrições:</strong> Para amanhã após 12h; Para hoje até 08h.</div>
+    <div id="statusArea" class="status-msg">Iniciando conexão...</div>
+
+    <div class="form-group">
+        <label>Professor(a):</label>
+        <select id="professorSelect"><option value="">-- Selecione seu nome --</option></select>
+    </div>
+    <div class="form-group">
+        <label>Horário:</label>
+        <select id="horario">
+            <option value="11:40">11:40 (1º Almoço)</option>
+            <option value="12:20">12:20 (2º Almoço)</option>
+        </select>
+    </div>
+    <button id="btnInscricao" onclick="registrar()" disabled>Confirmar</button>
+
+    <div class="columns">
+        <div class="column"><h3>🍽️ 11:40</h3><ul id="lista1140"></ul></div>
+        <div class="column"><h3>🍽️ 12:20</h3><ul id="lista1220"></ul></div>
+    </div>
+    <div class="adm-section"><button class="btn-adm" id="toggleAdm" onclick="ativarModoAdm()">Acesso ADM</button></div>
+</div>
+
+<script>
+    // ==========================================
+    // COLE SUAS CONFIGURAÇÕES DO FIREBASE ABAIXO
+    // ==========================================
+    const firebaseConfig = {
+        apiKey: "AIzaSyDyf2UtgpxJunK4SxVUOIlgV7UX0AMyAvs",
+
+    authDomain: "almoco-iern.firebaseapp.com",
+
+    projectId: "almoco-iern",
+
+    storageBucket: "almoco-iern.firebasestorage.app",
+
+    messagingSenderId: "707158080633",
+
+    appId: "1:707158080633:web:d0fa699346301eb7c9e8a8"
+    };
+    // ==========================================
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const SENHA_ADM = "iern123";
+    let modoAdmAtivo = false;
+    let inscritosAtuais = [];
+
+    const PROFESSORES = ["Acacio", "Aetius", "Ana Cristina", "Arthur", "Audra", "Bruna", "Ana Carolina", "Clea", "Cléo", "Dayse", "Edson", "Eduardo", "Elaine", "Felipe", "Francisco", "Helton", "Iésu", "Jéssica", "Joás", "Josangela", "Miqueias", "Pietro", "Romênia", "Rogério", "Rosivaldo", "Rusiella", "Sheila", "Sueilha", "Sumara", "Themine", "Túllio", "Waltecia"].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+
+    function popularSelect() {
+        const select = document.getElementById('professorSelect');
+        PROFESSORES.forEach(prof => {
+            let opt = document.createElement('option');
+            opt.value = opt.textContent = prof;
+            select.appendChild(opt);
+        });
+    }
+
+    function obterDataAlvo() {
+        const agora = new Date();
+        let dataAlvo = new Date();
+        if (agora.getHours() >= 12) dataAlvo.setDate(agora.getDate() + 1);
+        return dataAlvo.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+    }
+
+    // LISTENER EM TEMPO REAL: Esta função roda toda vez que alguém muda algo no banco
+    db.ref('inscritos').on('value', (snapshot) => {
+        const data = snapshot.val();
+        inscritosAtuais = data ? Object.values(data) : [];
+        renderizarListas();
+        atualizarStatus();
+    });
+
+    function atualizarStatus() {
+        const hora = new Date().getHours();
+        const btn = document.getElementById('btnInscricao');
+        const statusArea = document.getElementById('statusArea');
+        document.getElementById('dataExibicao').innerHTML = `📅 Almoço de:<br><strong>${obterDataAlvo()}</strong>`;
+
+        if (hora >= 8 && hora < 12) {
+            btn.disabled = true;
+            statusArea.textContent = "🔒 Sistema fechado para organização.";
+            statusArea.className = "status-msg error";
+        } else {
+            btn.disabled = false;
+            statusArea.textContent = "✅ Sistema aberto e conectado.";
+            statusArea.className = "status-msg success";
+        }
+    }
+
+    function registrar() {
+        const nome = document.getElementById('professorSelect').value;
+        const horario = document.getElementById('horario').value;
+        if (!nome) { alert("Selecione seu nome."); return; }
+        if (inscritosAtuais.some(p => p.nome === nome)) { alert("Você já está na lista!"); return; }
+
+        db.ref('inscritos/' + nome).set({ nome, horario });
+        document.getElementById('professorSelect').value = "";
+    }
+
+    function removerProfessor(nome) {
+        if (confirm(`Remover ${nome}?`)) db.ref('inscritos/' + nome).remove();
+    }
+
+    function ativarModoAdm() {
+        if (!modoAdmAtivo) {
+            if (prompt("Senha ADM:") === SENHA_ADM) {
+                modoAdmAtivo = true;
+                document.getElementById('toggleAdm').textContent = "Sair do ADM";
+                renderizarListas();
+            }
+        } else {
+            modoAdmAtivo = false;
+            document.getElementById('toggleAdm').textContent = "Acesso ADM";
+            renderizarListas();
+        }
+    }
+
+    function renderizarListas() {
+        const l1140 = document.getElementById('lista1140');
+        const l1220 = document.getElementById('lista1220');
+        l1140.innerHTML = l1220.innerHTML = "";
+        
+        [...inscritosAtuais].sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(p => {
+            const li = document.createElement('li');
+            li.innerHTML = `<span>${p.nome}</span><button class="btn-del" style="display:${modoAdmAtivo?'block':'none'}" onclick="removerProfessor('${p.nome}')">X</button>`;
+            (p.horario === "11:40" ? l1140 : l1220).appendChild(li);
+        });
+    }
+
+    // Reset Automático às 12h
+    setInterval(() => {
+        const agora = new Date();
+        const hoje = agora.toDateString();
+        const lastReset = localStorage.getItem('lastResetDate');
+        if (lastReset !== hoje && agora.getHours() === 12) {
+            db.ref('inscritos').remove();
+            localStorage.setItem('lastResetDate', hoje);
+        }
+        atualizarStatus();
+    }, 30000);
+
+    popularSelect();
+    atualizarStatus();
+</script>
+</body>
+</html>
